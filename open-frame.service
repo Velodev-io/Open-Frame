@@ -1,0 +1,16 @@
+[Unit]
+Description=Open Frame Photo Gallery Server
+After=network.target
+
+[Service]
+Type=simple
+User=suryansh
+WorkingDirectory=/home/suryansh/Projects/Open Frame
+ExecStart=/usr/bin/npm run web
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

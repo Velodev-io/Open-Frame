@@ -1,0 +1,11 @@
+node_modules/
+*.log
+npm-debug.log*
+
+# User data
+*.db
+*.db-journal
+
+# OS files
+.DS_Store
+Thumbs.db
