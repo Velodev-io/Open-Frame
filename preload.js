@@ -9,6 +9,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     verifyPassword: (password) => ipcRenderer.invoke('auth:verify-password', password),
     loginSuccess: () => ipcRenderer.send('auth:login-success'),
     changePassword: (oldPassword, newPassword) => ipcRenderer.invoke('auth:change-password', oldPassword, newPassword),
+    logout: () => ipcRenderer.invoke('auth:logout'),
 
     // Photo APIs
     getAllPhotos: () => ipcRenderer.invoke('photos:get-all'),
@@ -17,6 +18,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
     // Event listeners
     onImportProgress: (callback) => {
+        ipcRenderer.removeAllListeners('photos:import-progress');
         ipcRenderer.on('photos:import-progress', (event, progress) => callback(progress));
     }
 });

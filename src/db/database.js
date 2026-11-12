@@ -101,13 +101,22 @@ class DatabaseManager {
         return stmt.run(id);
     }
 
-    photoExists(originalPath) {
-        const stmt = this.db.prepare('SELECT id FROM photos WHERE original_path = ?');
-        return stmt.get(originalPath) !== undefined;
+    photoExists(originalPath, filename = null, fileSize = null) {
+        const byPathStmt = this.db.prepare('SELECT id FROM photos WHERE original_path = ?');
+        if (byPathStmt.get(originalPath) !== undefined) {
+            return true;
+        }
+        if (filename !== null && fileSize !== null) {
+            const byMetaStmt = this.db.prepare('SELECT id FROM photos WHERE filename = ? AND file_size = ?');
+            return byMetaStmt.get(filename, fileSize) !== undefined;
+        }
+        return false;
     }
 
     close() {
-        this.db.close();
+        if (this.db && this.db.open) {
+            this.db.close();
+        }
     }
 }
 

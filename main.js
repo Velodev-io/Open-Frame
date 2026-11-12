@@ -23,7 +23,17 @@ if (!fs.existsSync(PHOTOS_DIR)) {
     fs.mkdirSync(PHOTOS_DIR, { recursive: true });
 }
 
+function initializeServices() {
+    if (!db) {
+        db = new Database(DB_PATH);
+        auth = new Auth(db);
+        photoManager = new PhotoManager(db, PHOTOS_DIR);
+    }
+}
+
 function createWindow() {
+    initializeServices();
+
     mainWindow = new BrowserWindow({
         width: 1400,
         height: 900,
@@ -40,19 +50,7 @@ function createWindow() {
         titleBarStyle: 'default'
     });
 
-    // Initialize modules
-    db = new Database(DB_PATH);
-    auth = new Auth(db);
-    photoManager = new PhotoManager(db, PHOTOS_DIR);
-
-    // Check if password is set
-    const isFirstLaunch = !auth.hasPassword();
-
-    if (isFirstLaunch) {
-        mainWindow.loadFile('src/ui/login.html');
-    } else {
-        mainWindow.loadFile('src/ui/login.html');
-    }
+    mainWindow.loadFile('src/ui/login.html');
 
     // Open DevTools in development
     if (process.argv.includes('--dev')) {
@@ -73,6 +71,12 @@ app.whenReady().then(() => {
 app.on('window-all-closed', () => {
     if (process.platform !== 'darwin') {
         app.quit();
+    }
+});
+
+app.on('before-quit', () => {
+    if (db) {
+        db.close();
     }
 });
 
@@ -97,7 +101,7 @@ ipcMain.handle('auth:setup-password', async (event, password) => {
 ipcMain.handle('auth:verify-password', async (event, password) => {
     try {
         const isValid = await auth.verifyPassword(password);
-        return { success: isValid };
+        return { success: isValid, error: isValid ? undefined : 'Incorrect password' };
     } catch (error) {
         return { success: false, error: error.message };
     }
@@ -105,7 +109,17 @@ ipcMain.handle('auth:verify-password', async (event, password) => {
 
 // Load main app after successful login
 ipcMain.on('auth:login-success', () => {
-    mainWindow.loadFile('src/ui/index.html');
+    if (mainWindow) {
+        mainWindow.loadFile('src/ui/index.html');
+    }
+});
+
+// Logout back to login screen
+ipcMain.handle('auth:logout', async () => {
+    if (mainWindow) {
+        mainWindow.loadFile('src/ui/login.html');
+    }
+    return { success: true };
 });
 
 // Get all photos

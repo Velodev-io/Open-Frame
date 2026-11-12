@@ -595,6 +595,93 @@ body {
     letter-spacing: 0.5px;
 }
 
+/* Settings Modal */
+.settings-modal-content {
+    position: relative;
+    z-index: 1;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-accent);
+    border-radius: 20px;
+    padding: 36px;
+    width: 100%;
+    max-width: 440px;
+    animation: modalSlideUp 0.4s ease-out;
+}
+
+.settings-modal-content h3 {
+    font-size: 22px;
+    margin-bottom: 20px;
+}
+
+.settings-form {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.settings-form h4 {
+    font-size: 14px;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 4px;
+}
+
+.settings-input-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.settings-input-group label {
+    font-size: 13px;
+    color: var(--text-secondary);
+}
+
+.settings-input-group input {
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 10px 14px;
+    color: var(--text-primary);
+    font-size: 14px;
+    outline: none;
+    transition: border-color 0.2s ease;
+}
+
+.settings-input-group input:focus {
+    border-color: var(--accent-primary);
+}
+
+.settings-message {
+    font-size: 13px;
+    min-height: 18px;
+}
+
+.settings-message.error {
+    color: var(--error);
+}
+
+.settings-message.success {
+    color: var(--success);
+}
+
+.settings-submit-btn {
+    width: 100%;
+    justify-content: center;
+    margin-top: 4px;
+}
+
+.settings-divider {
+    height: 1px;
+    background: var(--border);
+    margin: 24px 0;
+}
+
+.settings-logout-btn {
+    width: 100%;
+}
+
 /* Responsive */
 @media (max-width: 768px) {
     .app-header {

@@ -1,12 +1,82 @@
-// Web version - uses fetch API and file input instead of Electron dialog
+// Dual-mode import script (supports both Electron IPC and Web fetch API)
 
 let isImporting = false;
 
-// Import photos using file input
+if (typeof window.electronAPI !== 'undefined' && window.electronAPI.onImportProgress) {
+    window.electronAPI.onImportProgress((progress) => {
+        updateProgress(progress);
+    });
+}
+
 async function importPhotos() {
     if (isImporting) return;
 
-    // Create file input
+    if (typeof window.electronAPI !== 'undefined') {
+        await importPhotosElectron();
+    } else {
+        importPhotosWeb();
+    }
+}
+
+async function importPhotosElectron() {
+    isImporting = true;
+    const importModal = document.getElementById('importModal');
+
+    try {
+        updateProgress({
+            current: 0,
+            total: 0,
+            imported: 0,
+            skipped: 0,
+            errors: 0,
+            currentFile: 'Selecting folder...'
+        });
+
+        const result = await window.electronAPI.importPhotos();
+
+        if (result.canceled) {
+            importModal.classList.remove('active');
+            isImporting = false;
+            return;
+        }
+
+        importModal.classList.add('active');
+
+        if (result.success) {
+            updateProgress({
+                current: result.total,
+                total: result.total,
+                imported: result.imported,
+                skipped: result.skipped,
+                errors: result.errors,
+                currentFile: 'Complete!'
+            });
+
+            setTimeout(async () => {
+                importModal.classList.remove('active');
+                isImporting = false;
+                await loadPhotos();
+
+                if (result.imported > 0) {
+                    alert(`Successfully imported ${result.imported} photo(s)!\n${result.skipped} skipped, ${result.errors} errors.`);
+                } else {
+                    alert(`No new photos imported (${result.skipped} skipped, ${result.errors} errors).`);
+                }
+            }, 800);
+        } else {
+            importModal.classList.remove('active');
+            isImporting = false;
+            alert('Failed to import photos: ' + result.error);
+        }
+    } catch (error) {
+        console.error('Import error:', error);
+        importModal.classList.remove('active');
+        isImporting = false;
+        alert('Failed to import photos');
+    }
+}
+
+function importPhotosWeb() {
     const fileInput = document.createElement('input');
     fileInput.type = 'file';
     fileInput.multiple = true;
@@ -20,7 +90,6 @@ async function importPhotos() {
         const importModal = document.getElementById('importModal');
         importModal.classList.add('active');
 
-        // Reset progress
         updateProgress({
             current: 0,
             total: files.length,
@@ -36,16 +105,20 @@ async function importPhotos() {
                 formData.append('photos', file);
             });
 
-            // Upload files
             const response = await fetch('/api/photos/import', {
                 method: 'POST',
+                headers: { 'Accept': 'application/json' },
                 body: formData
             });
+
+            if (response.status === 401) {
+                window.location.href = '/login';
+                return;
+            }
 
             const result = await response.json();
 
             if (result.success) {
-                // Update final progress
                 updateProgress({
                     current: result.total,
                     total: result.total,
@@ -55,21 +128,18 @@ async function importPhotos() {
                     currentFile: 'Complete!'
                 });
 
-                // Show final results
                 setTimeout(async () => {
                     importModal.classList.remove('active');
                     isImporting = false;
 
-                    // Reload photos
                     await loadPhotos();
 
-                    // Show success message
                     if (result.imported > 0) {
-                        alert(`Successfully imported ${result.imported} photo(s)!\\n${result.skipped} skipped, ${result.errors} errors.`);
+                        alert(`Successfully imported ${result.imported} photo(s)!\n${result.skipped} skipped, ${result.errors} errors.`);
                     } else {
-                        alert('No new photos to import.');
+                        alert(`No new photos to import (${result.skipped} skipped, ${result.errors} errors).`);
                     }
-                }, 1000);
+                }, 800);
             } else {
                 importModal.classList.remove('active');
                 isImporting = false;
@@ -88,24 +158,26 @@ async function importPhotos() {
 
 // Update progress display
 function updateProgress(progress) {
+    const importModal = document.getElementById('importModal');
+    if (progress.total > 0 && !importModal.classList.contains('active')) {
+        importModal.classList.add('active');
+    }
+
     const progressFill = document.getElementById('progressFill');
     const progressText = document.getElementById('progressText');
     const importedCount = document.getElementById('importedCount');
     const skippedCount = document.getElementById('skippedCount');
     const errorCount = document.getElementById('errorCount');
 
-    // Update progress bar
     const percentage = progress.total > 0 ? (progress.current / progress.total) * 100 : 0;
     progressFill.style.width = percentage + '%';
 
-    // Update text
     if (progress.total > 0) {
         progressText.textContent = `Processing ${progress.currentFile} (${progress.current}/${progress.total})`;
     } else {
         progressText.textContent = progress.currentFile;
     }
 
-    // Update counts
     importedCount.textContent = progress.imported;
     skippedCount.textContent = progress.skipped;
     errorCount.textContent = progress.errors;

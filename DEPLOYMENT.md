@@ -15,7 +15,7 @@ Open Frame is now permanently installed on your Ubuntu system!
 
 **Option 2: Quick Launcher**
 ```bash
-cd "/home/suryansh/Projects/Open Frame"
+cd "/path/to/Open Frame"
 ./open-frame-desktop.sh
 ```
 
@@ -70,7 +70,7 @@ journalctl -u open-frame -f
 To remove Open Frame from your system:
 
 ```bash
-cd "/home/suryansh/Projects/Open Frame"
+cd "/path/to/Open Frame"
 ./uninstall.sh
 ```
 

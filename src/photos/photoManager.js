@@ -1,6 +1,7 @@
 const fs = require('fs').promises;
 const fsSync = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const sharp = require('sharp');
 
 const SUPPORTED_FORMATS = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.tiff'];
@@ -27,10 +28,13 @@ class PhotoManager {
 
         for (let i = 0; i < files.length; i++) {
             const filePath = files[i];
+            const filename = path.basename(filePath);
 
             try {
+                const stats = await fs.stat(filePath);
+
                 // Check if already imported
-                if (this.db.photoExists(filePath)) {
+                if (this.db.photoExists(filePath, filename, stats.size)) {
                     skipped++;
                     if (progressCallback) {
                         progressCallback({
@@ -39,14 +43,14 @@ class PhotoManager {
                             imported,
                             skipped,
                             errors,
-                            currentFile: path.basename(filePath)
+                            currentFile: filename
                         });
                     }
                     continue;
                 }
 
                 // Import the photo
-                await this.importPhoto(filePath);
+                await this.importPhoto(filePath, filename);
                 imported++;
             } catch (error) {
                 console.error(`Error importing ${filePath}:`, error);
@@ -60,7 +64,7 @@ class PhotoManager {
                     imported,
                     skipped,
                     errors,
-                    currentFile: path.basename(filePath)
+                    currentFile: filename
                 });
             }
         }
@@ -92,51 +96,74 @@ class PhotoManager {
         return files;
     }
 
-    async importPhoto(filePath) {
-        const filename = path.basename(filePath);
-        const ext = path.extname(filename);
-        const timestamp = Date.now();
-        const storedFilename = `${timestamp}_${filename}`;
+    async importPhoto(filePath, originalFilename = null) {
+        const rawName = originalFilename || path.basename(filePath);
+        const filename = path.basename(rawName);
+        const parsed = path.parse(filename);
+        const ext = (parsed.ext || path.extname(filePath)).toLowerCase();
+
+        if (ext && !SUPPORTED_FORMATS.includes(ext)) {
+            throw new Error(`Unsupported image format: ${ext}`);
+        }
+
+        const uniquePrefix = `${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
+        const safeBaseName = parsed.name.replace(/[^a-zA-Z0-9._-]/g, '_') || 'photo';
+        const finalExt = ext || '.jpg';
+        const storedFilename = `${uniquePrefix}_${safeBaseName}${finalExt}`;
         const storedPath = path.join(this.photosDir, storedFilename);
-        const thumbnailFilename = `thumb_${timestamp}_${filename.replace(ext, '.jpg')}`;
+        const thumbnailFilename = `thumb_${uniquePrefix}_${safeBaseName}.jpg`;
         const thumbnailPath = path.join(this.thumbnailsDir, thumbnailFilename);
 
         // Copy original file
         await fs.copyFile(filePath, storedPath);
 
-        // Get image metadata and create thumbnail
-        const image = sharp(filePath);
-        const metadata = await image.metadata();
+        try {
+            // Get image metadata and create thumbnail with EXIF orientation applied
+            const image = sharp(filePath);
+            const metadata = await image.metadata();
 
-        // Create thumbnail
-        await image
-            .resize(THUMBNAIL_SIZE, THUMBNAIL_SIZE, {
-                fit: 'cover',
-                position: 'center'
-            })
-            .jpeg({ quality: 80 })
-            .toFile(thumbnailPath);
+            // Account for EXIF orientation 5-8 where width/height swap
+            const isRotated = metadata.orientation && metadata.orientation >= 5 && metadata.orientation <= 8;
+            const width = isRotated ? metadata.height : metadata.width;
+            const height = isRotated ? metadata.width : metadata.height;
 
-        // Get file stats
-        const stats = await fs.stat(filePath);
+            await sharp(filePath)
+                .rotate()
+                .resize(THUMBNAIL_SIZE, THUMBNAIL_SIZE, {
+                    fit: 'cover',
+                    position: 'center'
+                })
+                .jpeg({ quality: 80 })
+                .toFile(thumbnailPath);
 
-        // Get creation time (try to use EXIF data if available, otherwise use file stats)
-        let createdAt = stats.birthtime || stats.mtime;
+            // Get file stats
+            const stats = await fs.stat(filePath);
+            const createdAt = stats.birthtime || stats.mtime;
 
-        // Store in database
-        const photoData = {
-            originalPath: filePath,
-            storedPath: storedPath,
-            thumbnailPath: thumbnailPath,
-            filename: filename,
-            fileSize: stats.size,
-            width: metadata.width,
-            height: metadata.height,
-            format: metadata.format,
-            createdAt: createdAt.toISOString()
-        };
+            // Store in database
+            const photoData = {
+                originalPath: originalFilename ? filename : filePath,
+                storedPath: storedPath,
+                thumbnailPath: thumbnailPath,
+                filename: filename,
+                fileSize: stats.size,
+                width: width,
+                height: height,
+                format: metadata.format,
+                createdAt: createdAt.toISOString()
+            };
 
-        return this.db.addPhoto(photoData);
+            return this.db.addPhoto(photoData);
+        } catch (error) {
+            // Clean up partially copied files if processing fails
+            if (fsSync.existsSync(storedPath)) {
+                await fs.unlink(storedPath).catch(() => {});
+            }
+            if (fsSync.existsSync(thumbnailPath)) {
+                await fs.unlink(thumbnailPath).catch(() => {});
+            }
+            throw error;
+        }
     }
 
     getAllPhotos() {

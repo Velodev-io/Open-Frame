@@ -1,7 +1,41 @@
-// Web version - uses fetch API instead of Electron IPC
+// Dual-mode gallery script (supports both Electron IPC and Web fetch API)
 
+const isElectron = typeof window.electronAPI !== 'undefined';
 let photos = [];
 let currentPhotoId = null;
+
+function toFileUrl(filePath) {
+    if (!filePath) return '';
+    const normalized = filePath.replace(/\\/g, '/');
+    return encodeURI(normalized.startsWith('/') ? `file://${normalized}` : `file:///${normalized}`);
+}
+
+function getThumbnailSrc(photo) {
+    if (isElectron && photo.thumbnail_path) {
+        return toFileUrl(photo.thumbnail_path);
+    }
+    return `/thumbnails/${photo.id}`;
+}
+
+function getPhotoSrc(photo) {
+    if (isElectron && photo.stored_path) {
+        return toFileUrl(photo.stored_path);
+    }
+    return `/photos/${photo.id}`;
+}
+
+// Parse SQLite UTC timestamp or ISO date string reliably
+function parseDate(input) {
+    if (input instanceof Date) return input;
+    if (typeof input === 'string') {
+        // SQLite CURRENT_TIMESTAMP format: "YYYY-MM-DD HH:MM:SS" (UTC)
+        if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(input)) {
+            return new Date(input.replace(' ', 'T') + 'Z');
+        }
+        return new Date(input);
+    }
+    return new Date();
+}
 
 // Load photos on page load
 async function loadPhotos() {
@@ -14,20 +48,29 @@ async function loadPhotos() {
     photoGrid.style.display = 'none';
 
     try {
-        const response = await fetch('/api/photos');
-        const result = await response.json();
+        let result;
+        if (isElectron) {
+            result = await window.electronAPI.getAllPhotos();
+        } else {
+            const response = await fetch('/api/photos', {
+                headers: { 'Accept': 'application/json' }
+            });
+            if (response.status === 401) {
+                window.location.href = '/login';
+                return;
+            }
+            result = await response.json();
+        }
 
         if (result.success) {
-            photos = result.photos;
+            photos = result.photos || [];
+            updateStats(photos);
 
             if (photos.length === 0) {
-                // Show empty state
                 loadingState.style.display = 'none';
                 emptyState.style.display = 'flex';
             } else {
-                // Render photos
                 renderPhotos(photos);
-                updateStats(photos);
                 loadingState.style.display = 'none';
                 photoGrid.style.display = 'grid';
             }
@@ -61,7 +104,7 @@ function createPhotoCard(photo) {
     card.onclick = () => openPhotoModal(photo);
 
     const img = document.createElement('img');
-    img.src = `/thumbnails/${photo.id}`;
+    img.src = getThumbnailSrc(photo);
     img.alt = photo.filename;
     img.loading = 'lazy';
 
@@ -85,21 +128,22 @@ function createPhotoCard(photo) {
 }
 
 // Update stats
-function updateStats(photos) {
+function updateStats(photosList) {
     const totalPhotos = document.getElementById('totalPhotos');
     const storageUsed = document.getElementById('storageUsed');
     const lastImport = document.getElementById('lastImport');
 
-    totalPhotos.textContent = photos.length;
+    totalPhotos.textContent = photosList.length;
 
     // Calculate total storage
-    const totalBytes = photos.reduce((sum, photo) => sum + (photo.file_size || 0), 0);
+    const totalBytes = photosList.reduce((sum, photo) => sum + (photo.file_size || 0), 0);
     storageUsed.textContent = formatFileSize(totalBytes);
 
     // Get latest import date
-    if (photos.length > 0) {
-        const latestDate = new Date(photos[0].imported_at);
-        lastImport.textContent = formatDate(latestDate);
+    if (photosList.length > 0) {
+        lastImport.textContent = formatDate(photosList[0].imported_at);
+    } else {
+        lastImport.textContent = 'Never';
     }
 }
 
@@ -114,10 +158,10 @@ function openPhotoModal(photo) {
     const modalSize = document.getElementById('modalSize');
     const modalDate = document.getElementById('modalDate');
 
-    modalImage.src = `/photos/${photo.id}`;
+    modalImage.src = getPhotoSrc(photo);
     modalFilename.textContent = photo.filename;
-    modalDimensions.textContent = `${photo.width} × ${photo.height}`;
-    modalSize.textContent = formatFileSize(photo.file_size);
+    modalDimensions.textContent = `${photo.width || 0} × ${photo.height || 0}`;
+    modalSize.textContent = formatFileSize(photo.file_size || 0);
     modalDate.textContent = formatDate(photo.created_at || photo.imported_at);
 
     modal.classList.add('active');
@@ -138,14 +182,23 @@ async function deletePhoto() {
     if (!confirmDelete) return;
 
     try {
-        const response = await fetch(`/api/photos/${currentPhotoId}`, {
-            method: 'DELETE'
-        });
-        const result = await response.json();
+        let result;
+        if (isElectron) {
+            result = await window.electronAPI.deletePhoto(currentPhotoId);
+        } else {
+            const response = await fetch(`/api/photos/${currentPhotoId}`, {
+                method: 'DELETE',
+                headers: { 'Accept': 'application/json' }
+            });
+            if (response.status === 401) {
+                window.location.href = '/login';
+                return;
+            }
+            result = await response.json();
+        }
 
         if (result.success) {
             closePhotoModal();
-            // Reload photos
             await loadPhotos();
         } else {
             alert('Failed to delete photo: ' + result.error);
@@ -170,23 +223,112 @@ function searchPhotos(query) {
     renderPhotos(filtered);
 }
 
+// Settings modal (Change Password & Logout)
+function openSettingsModal() {
+    const settingsModal = document.getElementById('settingsModal');
+    if (!settingsModal) return;
+    document.getElementById('changePasswordForm').reset();
+    document.getElementById('settingsMessage').textContent = '';
+    document.getElementById('settingsMessage').className = 'settings-message';
+    settingsModal.classList.add('active');
+}
+
+function closeSettingsModal() {
+    const settingsModal = document.getElementById('settingsModal');
+    if (settingsModal) {
+        settingsModal.classList.remove('active');
+    }
+}
+
+async function handleChangePassword(e) {
+    e.preventDefault();
+    const oldPassword = document.getElementById('currentPassword').value;
+    const newPassword = document.getElementById('newPassword').value;
+    const confirmPassword = document.getElementById('confirmNewPassword').value;
+    const msgEl = document.getElementById('settingsMessage');
+
+    msgEl.textContent = '';
+    msgEl.className = 'settings-message';
+
+    if (newPassword !== confirmPassword) {
+        msgEl.textContent = 'New passwords do not match.';
+        msgEl.classList.add('error');
+        return;
+    }
+
+    if (newPassword.length < 6) {
+        msgEl.textContent = 'New password must be at least 6 characters.';
+        msgEl.classList.add('error');
+        return;
+    }
+
+    try {
+        let result;
+        if (isElectron) {
+            result = await window.electronAPI.changePassword(oldPassword, newPassword);
+        } else {
+            const response = await fetch('/api/auth/change-password', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json'
+                },
+                body: JSON.stringify({ oldPassword, newPassword })
+            });
+            if (response.status === 401) {
+                window.location.href = '/login';
+                return;
+            }
+            result = await response.json();
+        }
+
+        if (result.success) {
+            document.getElementById('changePasswordForm').reset();
+            msgEl.textContent = 'Password updated successfully!';
+            msgEl.classList.add('success');
+        } else {
+            msgEl.textContent = result.error || 'Failed to update password.';
+            msgEl.classList.add('error');
+        }
+    } catch (error) {
+        msgEl.textContent = 'Failed to update password.';
+        msgEl.classList.add('error');
+    }
+}
+
+async function handleLogout() {
+    try {
+        if (isElectron) {
+            await window.electronAPI.logout();
+        } else {
+            await fetch('/api/auth/logout', { method: 'POST' });
+            window.location.href = '/login';
+        }
+    } catch (error) {
+        console.error('Error logging out:', error);
+    }
+}
+
 // Utility: Format file size
 function formatFileSize(bytes) {
-    if (bytes === 0) return '0 B';
+    if (!bytes || bytes === 0) return '0 B';
     const k = 1024;
     const sizes = ['B', 'KB', 'MB', 'GB'];
     const i = Math.floor(Math.log(bytes) / Math.log(k));
     return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + ' ' + sizes[i];
 }
 
-// Utility: Format date
-function formatDate(dateString) {
-    const date = new Date(dateString);
-    const now = new Date();
-    const diffTime = Math.abs(now - date);
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+// Utility: Format date using local calendar days
+function formatDate(dateInput) {
+    const date = parseDate(dateInput);
+    if (isNaN(date.getTime())) return 'Unknown';
 
-    if (diffDays === 0) return 'Today';
+    const now = new Date();
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const startOfTarget = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+    const diffDays = Math.round((startOfToday - startOfTarget) / (1000 * 60 * 60 * 24));
+
+    if (diffDays <= 0) return 'Today';
     if (diffDays === 1) return 'Yesterday';
     if (diffDays < 7) return `${diffDays} days ago`;
 
@@ -200,9 +342,32 @@ function formatDate(dateString) {
 // Event listeners
 document.getElementById('closeModal').addEventListener('click', closePhotoModal);
 document.getElementById('deletePhotoBtn').addEventListener('click', deletePhoto);
-
-// Close modal on backdrop click
 document.querySelector('#photoModal .modal-backdrop').addEventListener('click', closePhotoModal);
+
+const settingsBtn = document.getElementById('settingsBtn');
+if (settingsBtn) {
+    settingsBtn.addEventListener('click', openSettingsModal);
+}
+
+const closeSettingsBtn = document.getElementById('closeSettingsModal');
+if (closeSettingsBtn) {
+    closeSettingsBtn.addEventListener('click', closeSettingsModal);
+}
+
+const settingsBackdrop = document.querySelector('#settingsModal .modal-backdrop');
+if (settingsBackdrop) {
+    settingsBackdrop.addEventListener('click', closeSettingsModal);
+}
+
+const changePasswordForm = document.getElementById('changePasswordForm');
+if (changePasswordForm) {
+    changePasswordForm.addEventListener('submit', handleChangePassword);
+}
+
+const logoutBtn = document.getElementById('logoutBtn');
+if (logoutBtn) {
+    logoutBtn.addEventListener('click', handleLogout);
+}
 
 // Search
 document.getElementById('searchInput').addEventListener('input', (e) => {
@@ -213,6 +378,7 @@ document.getElementById('searchInput').addEventListener('input', (e) => {
 document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
         closePhotoModal();
+        closeSettingsModal();
     }
 });
 

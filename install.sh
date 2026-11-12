@@ -8,12 +8,17 @@ echo "  Open Frame - Permanent Installation"
 echo "=========================================="
 echo ""
 
-APP_DIR="/home/suryansh/Projects/Open Frame"
+APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CURRENT_USER="${SUDO_USER:-$USER}"
+NPM_BIN="$(command -v npm || echo /usr/bin/npm)"
 cd "$APP_DIR"
 
 # 1. Copy systemd service file
 echo "Installing systemd service..."
-sudo cp open-frame.service /etc/systemd/system/
+sed -e "s|{{USER}}|$CURRENT_USER|g" \
+    -e "s|{{APP_DIR}}|$APP_DIR|g" \
+    -e "s|{{NPM_BIN}}|$NPM_BIN|g" \
+    open-frame.service | sudo tee /etc/systemd/system/open-frame.service > /dev/null
 sudo systemctl daemon-reload
 
 # 2. Enable service to start on boot
@@ -27,9 +32,9 @@ sudo systemctl start open-frame.service
 # 4. Ensure desktop entry is properly installed
 echo "Installing desktop launcher..."
 chmod +x open-frame-desktop.sh
-chmod +x open-frame.desktop
 mkdir -p ~/.local/share/applications
-cp open-frame.desktop ~/.local/share/applications/
+sed -e "s|{{APP_DIR}}|$APP_DIR|g" open-frame.desktop > ~/.local/share/applications/open-frame.desktop
+chmod +x ~/.local/share/applications/open-frame.desktop
 update-desktop-database ~/.local/share/applications/ 2>/dev/null || true
 
 # 5. Check service status

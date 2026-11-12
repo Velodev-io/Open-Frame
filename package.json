@@ -1,11 +1,11 @@
 {
   "name": "open-frame",
   "version": "1.0.0",
-  "description": "Modern password-protected photo management app for Ubuntu",
+  "description": "Modern password-protected photo management app for macOS, Windows, and Linux",
   "main": "main.js",
   "scripts": {
-    "start": "GDK_BACKEND=x11 electron . --no-sandbox --disable-gpu --ozone-platform=x11",
-    "dev": "GDK_BACKEND=x11 electron . --no-sandbox --disable-gpu --ozone-platform=x11 --dev",
+    "start": "node launch-electron.js",
+    "dev": "node launch-electron.js --dev",
     "web": "node server.js",
     "web-dev": "nodemon server.js"
   },
@@ -13,7 +13,9 @@
     "electron",
     "photos",
     "gallery",
-    "ubuntu"
+    "macos",
+    "windows",
+    "linux"
   ],
   "author": "",
   "license": "MIT",
